@@ -234,7 +234,7 @@ class Launch(tk.Tk):
                                               (result_full['branch-type'] == 2) &
                                               (result_full['euclidean-distance']>0)]
                 ridgeydata = result_filtered.groupby('filename')[['filename','branch-distance','scale','euclidean-distance','squiggle','mean shape index']].mean()
-                io.write_excel(self.output_filename.get(),
+                io.write_excel(self.output_folder / self.output_filename.get(),
                                branches=result_full,
                                images=result_image,
                                filtered=ridgeydata,
