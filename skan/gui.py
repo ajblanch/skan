@@ -229,9 +229,12 @@ class Launch(tk.Tk):
                     self.figure.savefig(output_filename, dpi=300)
             else:
                 result_full, result_image = result
+                result_filtered = result_full[result_full['mean shape index']>0.125 &
+                                              result_full['mean shape index']<0.625]
                 io.write_excel(self.output_filename.get(),
                                branches=result_full,
                                images=result_image,
+                               filtered=result_filtered,
                                parameters=json.loads(self.save_parameters()))
                 self.save_parameters(self.output_folder / 'skan-config.json')
 
