@@ -7,7 +7,7 @@ rundir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(rundir)
 
 from skan._testdata import (tinycycle, tinyline, skeleton0, skeleton1,
-                            skeleton2, skeleton3d, topograph1d)
+                            skeleton2, skeleton3d, topograph1d, skeleton4)
 
 
 def test_tiny_cycle():
@@ -103,6 +103,10 @@ def test_junction_multiplicity():
     """Test correct distances when a junction has more than one pixel."""
     g, idxs, degimg = csr.skeleton_to_csgraph(skeleton0)
     assert_almost_equal(g[3, 5], 2.0155644)
+    g, idxs, degimg = csr.skeleton_to_csgraph(skeleton0,
+                                              unique_junctions=False)
+    assert_almost_equal(g[2, 3], 1.0)
+    assert_almost_equal(g[3, 6], np.sqrt(2))
 
 
 def test_multiplicity_stats():
@@ -119,3 +123,8 @@ def test_pixel_values():
     expected = np.mean(image[1:-1])
     stats = csr.summarise(image)
     assert_almost_equal(stats.loc[0, 'mean pixel value'], expected)
+
+
+def test_tip_junction_edges():
+    stats1 = csr.summarise(skeleton4)
+    assert stats1.shape[0] == 3  # ensure all three branches are counted

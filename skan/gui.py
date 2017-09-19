@@ -44,6 +44,8 @@ class Launch(tk.Tk):
                                          name='Image format')
         self.scale_metadata_path = tk.StringVar(value='Scan/PixelHeight',
                                                 name='Scale metadata path')
+        self.preview_skeleton_plots = tk.BooleanVar(value=True, name='Live '
+                                                    'preview skeleton plot?')
         self.save_skeleton_plots = tk.BooleanVar(value=True,
                                                  name='Save skeleton plot?')
         self.skeleton_plot_prefix = tk.StringVar(value='skeleton-plot-',
@@ -58,6 +60,7 @@ class Launch(tk.Tk):
             self.brightness_offset,
             self.image_format,
             self.scale_metadata_path,
+            self.preview_skeleton_plots,
             self.save_skeleton_plots,
             self.skeleton_plot_prefix,
             self.output_filename,
@@ -210,8 +213,15 @@ class Launch(tk.Tk):
                 self.scale_metadata_path.get(),
                 crop_radius=self.crop_radius.get(),
                 smooth_method=self.smooth_method.get())
-        if save_skeleton:
+        if self.preview_skeleton_plots.get():
             self.make_figure_window()
+        elif self.save_skeleton_plots.get():
+            self.figure = Figure(figsize=(12, 9), dpi=300)
+            ax0 = self.figure.add_subplot(221)
+            axes = [self.figure.add_subplot(220 + i, sharex=ax0, sharey=ax0)
+                    for i in range(2, 5)]
+            self.axes = np.array([ax0] + axes)
+        self.save_parameters(self.output_folder / 'skan-config.json')
         for i, result in enumerate(images_iterator):
             if i < len(self.input_files):
                 filename, image, thresholded, skeleton, framedata = result
@@ -220,13 +230,14 @@ class Launch(tk.Tk):
                         ax.clear()
                     draw.pipeline_plot(image, thresholded, skeleton, framedata,
                                        figure=self.figure, axes=self.axes)
-                    self.figure.canvas.draw()
                     output_basename = (save_skeleton +
                                        os.path.basename(
                                            os.path.splitext(filename)[0]) +
                                        '.png')
                     output_filename = str(self.output_folder / output_basename)
-                    self.figure.savefig(output_filename, dpi=300)
+                    self.figure.savefig(output_filename)
+                if self.preview_skeleton_plots.get():
+                    self.figure.canvas.draw_idle()
             else:
                 result_full, result_image = result
                 result_filtered = result_full[(result_full['mean shape index']>0.125) &
@@ -234,12 +245,12 @@ class Launch(tk.Tk):
                                               (result_full['branch-type'] == 2) &
                                               (result_full['euclidean-distance']>0)]
                 ridgeydata = result_filtered.groupby('filename')[['filename','branch-distance','scale','euclidean-distance','squiggle','mean shape index']].mean()
-                io.write_excel(self.output_folder / self.output_filename.get(),
+                io.write_excel(str(self.output_folder /
+                                   self.output_filename.get()),
                                branches=result_full,
                                images=result_image,
                                filtered=ridgeydata,
                                parameters=json.loads(self.save_parameters()))
-                self.save_parameters(self.output_folder / 'skan-config.json')
 
 
 def tk_update(loop, app):

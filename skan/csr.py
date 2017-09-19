@@ -191,7 +191,8 @@ def _uniquify_junctions(csmat, pixel_indices, junction_labels,
     csmat.data = np.maximum(csmat.data, tdata)
 
 
-def skeleton_to_csgraph(skel, *, spacing=1, value_is_height=False):
+def skeleton_to_csgraph(skel, *, spacing=1, value_is_height=False,
+                        unique_junctions=True):
     """Convert a skeleton image of thin lines to a graph of neighbor pixels.
 
     Parameters
@@ -205,11 +206,18 @@ def skeleton_to_csgraph(skel, *, spacing=1, value_is_height=False):
         either be a single value if the data has the same resolution along
         all axes, or it can be an array of the same shape as `skel` to
         indicate spacing along each axis.
+
+    Other Parameters
+    ----------------
     value_is_height : bool, optional
         If `True`, the pixel value at each point of the skeleton will be
         considered to be a height measurement, and this height will be
         incorporated into skeleton branch lengths. Used for analysis of
         atomic force microscopy (AFM) images.
+    unique_junctions : bool, optional
+        If True, adjacent junction nodes get collapsed into a single
+        conceptual node, with position at the centroid of all the connected
+        initial nodes.
 
     Returns
     -------
@@ -243,14 +251,15 @@ def skeleton_to_csgraph(skel, *, spacing=1, value_is_height=False):
     degree_image = ndi.convolve(skel.astype(int), degree_kernel,
                                 mode='constant') * skel
 
-    # group all connected junction nodes into "meganodes".
-    junctions = degree_image > 2
-    junction_ids = skelint[junctions]
-    labeled_junctions, centroids = compute_centroids(junctions)
-    labeled_junctions[junctions] = junction_ids[labeled_junctions[junctions]
-                                                - 1]
-    skelint[junctions] = labeled_junctions[junctions]
-    pixel_indices[np.unique(labeled_junctions)[1:]] = centroids
+    if unique_junctions:
+        # group all connected junction nodes into "meganodes".
+        junctions = degree_image > 2
+        junction_ids = skelint[junctions]
+        labeled_junctions, centroids = compute_centroids(junctions)
+        labeled_junctions[junctions] = \
+                                junction_ids[labeled_junctions[junctions] - 1]
+        skelint[junctions] = labeled_junctions[junctions]
+        pixel_indices[np.unique(labeled_junctions)[1:]] = centroids
 
     num_edges = np.sum(degree_image)  # *2, which is how many we need to store
     skelint = pad(skelint, 0)  # pad image to prevent looparound errors
@@ -258,8 +267,9 @@ def skeleton_to_csgraph(skel, *, spacing=1, value_is_height=False):
                                                   spacing=spacing)
     graph = _pixel_graph(skelint, steps, distances, num_edges, height)
 
-    _uniquify_junctions(graph, pixel_indices,
-                        labeled_junctions, centroids, spacing=spacing)
+    if unique_junctions:
+        _uniquify_junctions(graph, pixel_indices,
+                            labeled_junctions, centroids, spacing=spacing)
     return graph, pixel_indices, degree_image
 
 
@@ -334,6 +344,7 @@ def _expand_path(graph, source, step, visited, degrees):
         visited[source] = True
         s += graph.node_properties[source]
         n += 1
+    visited[step] = True
     return step, d, n, s, degrees[step]
 
 
@@ -341,27 +352,40 @@ def _expand_path(graph, source, step, visited, degrees):
 def _branch_statistics_loop(jgraph, degrees, visited, result):
     num_results = 0
     for node in range(1, jgraph.shape[0]):
-        if degrees[node] == 2 and not visited[node]:
-            visited[node] = True
-            left, right = jgraph.neighbors(node)
-            id0, d0, n0, s0, deg0 = _expand_path(jgraph, node, left,
-                                                 visited, degrees)
-            if id0 == node:  # standalone cycle
-                id1, d1, n1, s1, deg1 = node, 0, 0, 0., 2
-                kind = 3
-            else:
-                id1, d1, n1, s1, deg1 = _expand_path(jgraph, node, right,
+        if not visited[node]:
+            if degrees[node] == 2:
+                visited[node] = True
+                left, right = jgraph.neighbors(node)
+                id0, d0, n0, s0, deg0 = _expand_path(jgraph, node, left,
                                                      visited, degrees)
-                kind = 2  # default: junction-to-junction
-                if deg0 == 1 and deg1 == 1:  # tip-tip
-                    kind = 0
-                elif deg0 == 1 or deg1 == 1:  # tip-junct, tip-path impossible
-                    kind = 1
-            counts = n0 + n1 + 1
-            values = s0 + s1 + jgraph.node_properties[node]
-            result[num_results, :] = (float(id0), float(id1), d0 + d1,
-                                      float(kind), values / counts)
-            num_results += 1
+                if id0 == node:  # standalone cycle
+                    id1, d1, n1, s1, deg1 = node, 0, 0, 0., 2
+                    kind = 3
+                else:
+                    id1, d1, n1, s1, deg1 = _expand_path(jgraph, node, right,
+                                                         visited, degrees)
+                    kind = 2  # default: junction-to-junction
+                    if deg0 == 1 and deg1 == 1:  # tip-tip
+                        kind = 0
+                    elif deg0 == 1 or deg1 == 1:  # tip-junct, tip-path impossible
+                        kind = 1
+                counts = n0 + n1 + 1
+                values = s0 + s1 + jgraph.node_properties[node]
+                result[num_results, :] = (float(id0), float(id1), d0 + d1,
+                                          float(kind), values / counts)
+                num_results += 1
+            elif degrees[node] == 1:
+                visited[node] = True
+                neighbor = jgraph.neighbors(node)[0]
+                id0, d0, n0, s0, deg0 = _expand_path(jgraph, node, neighbor,
+                                                     visited, degrees)
+                kind = 1 if deg0 > 2 else 0  # tip-junct / tip-tip
+                counts = n0
+                values = s0
+                avg_value = np.nan if counts == 0 else values / counts
+                result[num_results, :] = (float(node), float(id0), d0,
+                                          float(kind), avg_value)
+                num_results += 1
     return num_results
 
 
